@@ -1,3 +1,14 @@
+A fork of deface, a program that anonymizes videos. Here you can specify a rectangle in which the anonymization of faces is not applied. This works very well. x1, y1 and x2, y2 describe the rectangle in which the faces remain recognizable.
+
+deface <inputfile> --exclude x1 y1 x2 y2
+
+I also experimented with recognizing a specific face and excluding it from the anonymization. The image must be specified in the code under line 26, reference_image_path = "/myknownfacespath/face_to_exclude.png".  
+
+This doesn't work so well yet, but it can certainly be optimized. 
+
+deface --tolerance 0.6 <inputfile> sets the tolerance used for face recognition to 0.6.
+
+Hier the original readme:  
 [![PyPI](https://img.shields.io/pypi/v/deface)](https://pypi.org/project/deface/) [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/ORB-HD/deface/python-publish.yml)](https://github.com/ORB-HD/deface/actions)
 
 # `deface`: Video anonymization by face detection
