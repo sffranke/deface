@@ -4,7 +4,7 @@ import argparse
 import json
 import mimetypes
 import os
-from typing import Dict, Tuple
+from typing import Dict, Tuple  
 
 import tqdm
 import skimage.draw
@@ -14,9 +14,32 @@ import imageio.v2 as iio
 import imageio.plugins.ffmpeg
 import cv2
 
+import face_recognition
+
 from deface import __version__
 from deface.centerface import CenterFace
 
+def load_reference_face(reference_image_path):
+    reference_image = face_recognition.load_image_file(reference_image_path)
+    reference_face_encoding = face_recognition.face_encodings(reference_image)[0]
+    return reference_face_encoding
+    
+    
+reference_image_path = "/home/franke/Videos/known_faces/sf.png"
+reference_face_encoding = load_reference_face(reference_image_path)
+
+
+def recognize_faces(frame):
+    # Find all face locations and encodings in the current frame
+    face_locations = face_recognition.face_locations(frame)
+    face_encodings = face_recognition.face_encodings(frame, face_locations)
+    return face_locations, face_encodings
+
+
+def is_face_match(reference_face_encoding, face_encoding, tolerance):
+    match = face_recognition.compare_faces([reference_face_encoding], face_encoding, tolerance=tolerance)
+    return match[0] 
+    
 
 def scale_bb(x1, y1, x2, y2, mask_scale=1.0):
     s = mask_scale - 1.0
@@ -34,13 +57,17 @@ def draw_det(
         ellipse: bool = True,
         draw_scores: bool = False,
         ovcolor: Tuple[int] = (0, 0, 0),
-        replaceimg = None,
-        mosaicsize: int = 20
+        replaceimg=None,
+        mosaicsize: int = 20,
+        exclude_rect: Tuple[int, int, int, int] = None  # (x1, y1, x2, y2)
 ):
+    if exclude_rect and x1 >= exclude_rect[0] and y1 >= exclude_rect[1] and x2 <= exclude_rect[2] and y2 <= exclude_rect[3]:
+       return  # Skip processing if the rectangle is within the exclusion area
+
     if replacewith == 'solid':
         cv2.rectangle(frame, (x1, y1), (x2, y2), ovcolor, -1)
     elif replacewith == 'blur':
-        bf = 2  # blur factor (number of pixels in each dimension that the face will be reduced to)
+        bf = 4  # blur factor (number of pixels in each dimension that the face will be reduced to)
         blurred_box =  cv2.blur(
             frame[y1:y2, x1:x2],
             (abs(x2 - x1) // bf, abs(y2 - y1) // bf)
@@ -75,26 +102,39 @@ def draw_det(
             cv2.FONT_HERSHEY_DUPLEX, 0.5, (0, 255, 0)
         )
 
-
 def anonymize_frame(
         dets, frame, mask_scale,
-        replacewith, ellipse, draw_scores, replaceimg, mosaicsize
+        replacewith, ellipse, draw_scores, replaceimg, mosaicsize,
+        exclude_rect: Tuple[int, int, int, int] = None,
+        reference_face_encoding=None, tolerance=0.5
 ):
-    for i, det in enumerate(dets):
-        boxes, score = det[:4], det[4]
-        x1, y1, x2, y2 = boxes.astype(int)
-        x1, y1, x2, y2 = scale_bb(x1, y1, x2, y2, mask_scale)
-        # Clip bb coordinates to valid frame region
-        y1, y2 = max(0, y1), min(frame.shape[0] - 1, y2)
-        x1, x2 = max(0, x1), min(frame.shape[1] - 1, x2)
-        draw_det(
-            frame, score, i, x1, y1, x2, y2,
-            replacewith=replacewith,
-            ellipse=ellipse,
-            draw_scores=draw_scores,
-            replaceimg=replaceimg,
-            mosaicsize=mosaicsize
-        )
+    face_locations, face_encodings = recognize_faces(frame)
+    
+    # Exclude the specific face if a reference face encoding is provided
+    #print("X ",reference_face_encoding)
+    if reference_face_encoding is not None and face_encodings:
+        for i, det in enumerate(dets):
+            boxes, score = det[:4], det[4]
+            x1, y1, x2, y2 = boxes.astype(int)
+            x1, y1, x2, y2 = scale_bb(x1, y1, x2, y2, mask_scale)
+            # Clip bb coordinates to valid frame region
+            y1, y2 = max(0, y1), min(frame.shape[0] - 1, y2)
+            x1, x2 = max(0, x1), min(frame.shape[1] - 1, x2)
+    
+            if i < len(face_encodings):
+                if is_face_match(reference_face_encoding, face_encodings[i], tolerance):
+                    print("Face to skip match: ")
+                    continue  # Skip processing this face
+
+            draw_det(
+                frame, score, i, x1, y1, x2, y2,
+                replacewith=replacewith,
+                ellipse=ellipse,
+                draw_scores=draw_scores,
+                replaceimg=replaceimg,
+                mosaicsize=mosaicsize,
+                exclude_rect=exclude_rect
+            )
 
 
 def cam_read_iter(reader):
@@ -118,6 +158,7 @@ def video_detect(
         replaceimg = None,
         keep_audio: bool = False,
         mosaicsize: int = 20,
+        exclude_rect: Tuple[int, int, int, int] = None
 ):
     try:
         if 'fps' in ffmpeg_config:
@@ -164,7 +205,9 @@ def video_detect(
         anonymize_frame(
             dets, frame, mask_scale=mask_scale,
             replacewith=replacewith, ellipse=ellipse, draw_scores=draw_scores,
-            replaceimg=replaceimg, mosaicsize=mosaicsize
+            replaceimg=replaceimg, mosaicsize=mosaicsize,
+            exclude_rect=exclude_rect,  # Pass exclude_rect to anonymize_frame
+            reference_face_encoding=reference_face_encoding
         )
 
         if opath is not None:
@@ -209,7 +252,7 @@ def image_detect(
     anonymize_frame(
         dets, frame, mask_scale=mask_scale,
         replacewith=replacewith, ellipse=ellipse, draw_scores=draw_scores,
-        replaceimg=replaceimg, mosaicsize=mosaicsize
+        replaceimg=replaceimg, mosaicsize=mosaicsize,reference_face_encoding=reference_face_encoding
     )
 
     if enable_preview:
@@ -321,6 +364,12 @@ def parse_cli_args():
         '--keep-metadata', '-m', default=False, action='store_true',
         help='Keep metadata of the original image. Default : False.')
     parser.add_argument('--help', '-h', action='help', help='Show this help message and exit.')
+    
+    parser.add_argument(
+        '--exclude-rect', '-e', default=None, type=int, nargs=4, metavar=('ex1', 'ey1', 'ex2', 'ey2'),
+        help='Exclude a rectangle region from anonymization. Provide the top-left (x1, y1) and bottom-right (x2, y2) coordinates.'
+    )
+    parser.add_argument('--tolerance', '-to', type=float, default=0.7, help='Tolerance for face recognition (default: 0.7)')
 
     args = parser.parse_args()
 
@@ -366,6 +415,17 @@ def main():
     mosaicsize = args.mosaicsize
     keep_metadata = args.keep_metadata
     replaceimg = None
+    exclude_rect = args.exclude_rect
+    
+    # Define the coordinates of the rectangle to exclude
+    '''
+    ex1 = 960/2  # Example: top-left x-coordinate
+    ey1 = 0  # Example: top-left y-coordinate
+    ex2 = 960/2+960/4  # Example: bottom-right x-coordinate
+    ey2 = 540  # Example: bottom-right y-coordinate
+    '''
+    #exclude_rect = (ex1, ey1, ex2, ey2) 
+    
     if in_shape is not None:
         w, h = in_shape.split('x')
         in_shape = int(w), int(h)
@@ -410,7 +470,8 @@ def main():
                 keep_audio=keep_audio,
                 ffmpeg_config=ffmpeg_config,
                 replaceimg=replaceimg,
-                mosaicsize=mosaicsize
+                mosaicsize=mosaicsize,
+                exclude_rect=exclude_rect
             )
         elif filetype == 'image':
             image_detect(
@@ -425,7 +486,8 @@ def main():
                 enable_preview=enable_preview,
                 keep_metadata=keep_metadata,
                 replaceimg=replaceimg,
-                mosaicsize=mosaicsize
+                mosaicsize=mosaicsize,
+                exclude_rect=exclude_rect
             )
         elif filetype is None:
             print(f'Can\'t determine file type of file {ipath}. Skipping...')
