@@ -1,9 +1,13 @@
 '''
 A GUI to find the values of the rectangle in which no anionymization should take place.
 '''
+import os
 import tkinter as tk
+import subprocess
 from tkinter import filedialog
 from PIL import Image, ImageTk
+
+defacepath = "/home/franke/env3_10/bin/deface"
 
 class ImageRectSelector:
     def __init__(self, master):
@@ -32,6 +36,8 @@ class ImageRectSelector:
 
     def upload_image(self):
         file_path = filedialog.askopenfilename()
+        self.file = file_path
+
         if file_path:
             self.image = Image.open(file_path)
             self.image_original_size = self.image.size
@@ -61,12 +67,17 @@ class ImageRectSelector:
                 int(self.rect_coords[2] * scale_x),
                 int(self.rect_coords[3] * scale_y),
             )
-            print("Coordinates of the rectangle:")
-            print("x1 =", adjusted_coords[0])
-            print("y1 =", adjusted_coords[1])
-            print("x2 =", adjusted_coords[2])
-            print("y2 =", adjusted_coords[3])
-        else:
+            # Extract filename and extension from the uploaded file path
+            filename, ext = os.path.splitext(os.path.basename(self.file))
+        
+            # Construct the output filename
+            output_filename = f"anon_{filename}{ext}" 
+
+            print(defacepath," ",self.file," --boxes --draw-scores --exclude ",adjusted_coords[0]," ",adjusted_coords[1]," ",adjusted_coords[2]," ", adjusted_coords[3]," --boxes --draw-scores --output ", output_filename)
+            
+            command = [defacepath,self.file, "--boxes","--draw-scores","--exclude",str(adjusted_coords[0]), str(adjusted_coords[1]), str(adjusted_coords[2]),str(adjusted_coords[3]),"--output",output_filename]
+            subprocess.run(command)
+        else:  
             print("No rectangle drawn yet.")
 
     def restart(self):
