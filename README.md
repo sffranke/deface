@@ -1,4 +1,4 @@
-A fork of deface, a program that anonymizes videos. Here you can specify a rectangle in which the anonymization of faces is not applied. This works very well. x1, y1 and x2, y2 describe the rectangle in which the faces remain recognizable.
+A fork of deface, a program that anonymizes videos or images. Here you can specify a rectangle in which the anonymization of faces is not applied. This works very well. x1, y1 and x2, y2 describe the rectangle in which the faces remain recognizable.
 
 deface <inputfile> --exclude x1 y1 x2 y2
 
